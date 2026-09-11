@@ -1,13 +1,13 @@
 const fs = require("fs");
-const User = require("../models/User");
-const SecurityEvent = require("../models/SecurityEvent");
+const path = require("path");
 
 const analyzeScreenshot = async (req, res) => {
-  try {
-    // ==========================================
-    // CHECK IMAGE
-    // ==========================================
+  let uploadedFilePath = null;
 
+  try {
+    // -----------------------------------------
+    // 1. Check screenshot
+    // -----------------------------------------
     if (!req.file) {
       return res.status(400).json({
         success: false,
@@ -15,32 +15,11 @@ const analyzeScreenshot = async (req, res) => {
       });
     }
 
-    // ==========================================
-    // CHECK USER
-    // ==========================================
+    uploadedFilePath = req.file.path;
 
-    const userId = req.body.user;
-
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        message: "User ID is required",
-      });
-    }
-
-    const user = await User.findById(userId);
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
-    // ==========================================
-    // CHECK GEMINI API KEY
-    // ==========================================
-
+    // -----------------------------------------
+    // 2. Check Gemini API key
+    // -----------------------------------------
     if (!process.env.GEMINI_API_KEY) {
       return res.status(500).json({
         success: false,
@@ -48,33 +27,38 @@ const analyzeScreenshot = async (req, res) => {
       });
     }
 
-    // ==========================================
-    // READ IMAGE
-    // ==========================================
-
+    // -----------------------------------------
+    // 3. Read uploaded image
+    // -----------------------------------------
     const imageBuffer = fs.readFileSync(req.file.path);
-
     const base64Image = imageBuffer.toString("base64");
 
-    // ==========================================
-    // GEMINI PROMPT
-    // ==========================================
-
+    // -----------------------------------------
+    // 4. Cyber Shield AI Prompt
+    // -----------------------------------------
     const prompt = `
-You are a cybersecurity screenshot analyzer.
+You are Cyber Shield AI, a cybersecurity screenshot analyzer.
 
-Analyze the provided screenshot for possible:
+Analyze the provided screenshot for possible cybersecurity threats.
+
+Look specifically for:
+
 - phishing
 - scam messages
 - fake account verification
 - OTP requests
 - password requests
 - banking/payment scams
+- fake refunds
 - impersonation
+- fake customer support
 - threats of account suspension
 - suspicious links
-- social engineering
 - malicious instructions
+- social engineering
+- urgency or pressure tactics
+- requests for sensitive information
+- suspicious payment instructions
 
 Return ONLY valid JSON.
 
@@ -91,27 +75,35 @@ Use exactly this structure:
 
 Rules:
 
-riskScore must be between 0 and 100.
+1. riskScore must be a number between 0 and 100.
 
-riskLevel must be exactly one of:
+2. riskLevel must be exactly one of:
 LOW
 MEDIUM
 HIGH
 CRITICAL
 
-signals must be an array of short strings.
+3. signals must be an array of short strings.
 
-If there is no suspicious text, suspiciousText should be an empty string.
+4. suspiciousText must contain only text that is actually visible in the screenshot.
 
-Do not invent information that is not visible in the screenshot.
+5. If there is no suspicious text, return:
+"suspiciousText": ""
 
-Be conservative and explain why something is suspicious.
+6. Do not invent information that is not visible in the screenshot.
+
+7. Be conservative.
+
+8. Explain why the screenshot is suspicious or safe.
+
+9. The recommendation should give a clear cybersecurity safety action.
+
+10. Return JSON only. Do not use markdown or code fences.
 `;
 
-    // ==========================================
-    // CALL GEMINI
-    // ==========================================
-
+    // -----------------------------------------
+    // 5. Call Gemini AI
+    // -----------------------------------------
     const geminiResponse = await fetch(
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent",
       {
@@ -144,8 +136,14 @@ Be conservative and explain why something is suspicious.
 
     const geminiData = await geminiResponse.json();
 
+    // -----------------------------------------
+    // 6. Gemini API error
+    // -----------------------------------------
     if (!geminiResponse.ok) {
-      console.error("Gemini API error:", geminiData);
+      console.error(
+        "Gemini API error:",
+        JSON.stringify(geminiData, null, 2)
+      );
 
       return res.status(500).json({
         success: false,
@@ -156,24 +154,27 @@ Be conservative and explain why something is suspicious.
       });
     }
 
-    // ==========================================
-    // GET AI TEXT
-    // ==========================================
-
+    // -----------------------------------------
+    // 7. Get AI response
+    // -----------------------------------------
     const aiText =
       geminiData?.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!aiText) {
+      console.error(
+        "Gemini response did not contain analysis:",
+        JSON.stringify(geminiData, null, 2)
+      );
+
       return res.status(500).json({
         success: false,
         message: "AI did not return an analysis",
       });
     }
 
-    // ==========================================
-    // CLEAN JSON RESPONSE
-    // ==========================================
-
+    // -----------------------------------------
+    // 8. Clean AI JSON
+    // -----------------------------------------
     let cleanedText = aiText.trim();
 
     if (cleanedText.startsWith("```json")) {
@@ -190,12 +191,32 @@ Be conservative and explain why something is suspicious.
         .trim();
     }
 
+    // Sometimes AI may return extra text before/after JSON.
+    // Try to extract the JSON object safely.
+    const firstBrace = cleanedText.indexOf("{");
+    const lastBrace = cleanedText.lastIndexOf("}");
+
+    if (firstBrace !== -1 && lastBrace !== -1) {
+      cleanedText = cleanedText.substring(
+        firstBrace,
+        lastBrace + 1
+      );
+    }
+
+    // -----------------------------------------
+    // 9. Parse AI JSON
+    // -----------------------------------------
     let analysis;
 
     try {
       analysis = JSON.parse(cleanedText);
     } catch (parseError) {
-      console.error("AI JSON parse error:", aiText);
+      console.error(
+        "AI JSON parse error:",
+        parseError.message
+      );
+
+      console.error("Raw AI response:", aiText);
 
       return res.status(500).json({
         success: false,
@@ -204,15 +225,23 @@ Be conservative and explain why something is suspicious.
       });
     }
 
-    // ==========================================
-    // NORMALIZE VALUES
-    // ==========================================
+    // -----------------------------------------
+    // 10. Normalize Risk Score
+    // -----------------------------------------
+    let riskScore = Number(analysis.riskScore);
 
-    const riskScore = Math.min(
+    if (Number.isNaN(riskScore)) {
+      riskScore = 0;
+    }
+
+    riskScore = Math.min(
       100,
-      Math.max(0, Number(analysis.riskScore) || 0)
+      Math.max(0, Math.round(riskScore))
     );
 
+    // -----------------------------------------
+    // 11. Normalize Risk Level
+    // -----------------------------------------
     const allowedRiskLevels = [
       "LOW",
       "MEDIUM",
@@ -220,85 +249,65 @@ Be conservative and explain why something is suspicious.
       "CRITICAL",
     ];
 
-    const riskLevel = allowedRiskLevels.includes(
-      analysis.riskLevel
-    )
-      ? analysis.riskLevel
-      : riskScore >= 80
-      ? "HIGH"
-      : riskScore >= 50
-      ? "MEDIUM"
-      : "LOW";
+    let riskLevel = String(
+      analysis.riskLevel || ""
+    ).toUpperCase();
 
+    if (!allowedRiskLevels.includes(riskLevel)) {
+      if (riskScore >= 80) {
+        riskLevel = "CRITICAL";
+      } else if (riskScore >= 60) {
+        riskLevel = "HIGH";
+      } else if (riskScore >= 30) {
+        riskLevel = "MEDIUM";
+      } else {
+        riskLevel = "LOW";
+      }
+    }
+
+    // -----------------------------------------
+    // 12. Normalize Signals
+    // -----------------------------------------
     const signals = Array.isArray(analysis.signals)
       ? analysis.signals
+          .filter(
+            (signal) =>
+              typeof signal === "string" &&
+              signal.trim().length > 0
+          )
+          .map((signal) => signal.trim())
       : [];
 
-    // ==========================================
-    // GENERATE EVIDENCE ID
-    // ==========================================
+    // -----------------------------------------
+    // 13. Other AI fields
+    // -----------------------------------------
+    const suspiciousText =
+      typeof analysis.suspiciousText === "string"
+        ? analysis.suspiciousText.trim()
+        : "";
 
+    const explanation =
+      typeof analysis.explanation === "string"
+        ? analysis.explanation.trim()
+        : "Screenshot analyzed by Cyber Shield AI.";
+
+    const recommendation =
+      typeof analysis.recommendation === "string"
+        ? analysis.recommendation.trim()
+        : "Do not click suspicious links or share OTPs, passwords, PINs or banking information.";
+
+    // -----------------------------------------
+    // 14. Generate Evidence ID
+    // -----------------------------------------
     const evidenceId =
       "CS-" +
       Math.floor(1000 + Math.random() * 9000);
 
-    // ==========================================
-    // CREATE SECURITY EVENT
-    // ==========================================
+    const createdAt = new Date();
 
-    const event = await SecurityEvent.create({
-      user: user._id,
-
-      type: "SCREENSHOT_ANALYSIS",
-
-      title:
-        riskScore >= 70
-          ? "Suspicious Screenshot Detected"
-          : "Screenshot Security Analysis",
-
-      description:
-        analysis.explanation ||
-        "Screenshot analyzed by Cyber Shield AI.",
-
-      riskScore,
-
-      riskLevel,
-
-      status:
-        riskScore >= 70
-          ? "DETECTED"
-          : "RESOLVED",
-
-      metadata: {
-        evidenceId,
-
-        originalFileName: req.file.originalname,
-
-        storedFileName: req.file.filename,
-
-        mimeType: req.file.mimetype,
-
-        fileSize: req.file.size,
-
-        signals,
-
-        suspiciousText:
-          analysis.suspiciousText || "",
-
-        explanation:
-          analysis.explanation || "",
-
-        recommendation:
-          analysis.recommendation || "",
-
-        analyzedBy: "Gemini AI",
-      },
-    });
-
-    // ==========================================
-    // SUCCESS RESPONSE
-    // ==========================================
-
+    // -----------------------------------------
+    // 15. Final response
+    // -----------------------------------------
     return res.status(200).json({
       success: true,
 
@@ -306,29 +315,26 @@ Be conservative and explain why something is suspicious.
 
       analysis: {
         riskScore,
-
         riskLevel,
-
         signals,
-
-        suspiciousText:
-          analysis.suspiciousText || "",
-
-        explanation:
-          analysis.explanation || "",
-
-        recommendation:
-          analysis.recommendation || "",
+        suspiciousText,
+        explanation,
+        recommendation,
       },
 
       evidence: {
         id: evidenceId,
+        status:
+          riskScore >= 70
+            ? "DETECTED"
+            : "RESOLVED",
+        createdAt,
+      },
 
-        eventId: event._id,
-
-        status: event.status,
-
-        createdAt: event.createdAt,
+      file: {
+        originalName: req.file.originalname,
+        mimeType: req.file.mimetype,
+        size: req.file.size,
       },
     });
   } catch (error) {
@@ -342,6 +348,22 @@ Be conservative and explain why something is suspicious.
       message: "Screenshot analysis failed",
       error: error.message,
     });
+  } finally {
+    // -----------------------------------------
+    // 16. Delete temporary uploaded image
+    // -----------------------------------------
+    if (uploadedFilePath) {
+      try {
+        if (fs.existsSync(uploadedFilePath)) {
+          fs.unlinkSync(uploadedFilePath);
+        }
+      } catch (deleteError) {
+        console.error(
+          "Temporary screenshot cleanup error:",
+          deleteError.message
+        );
+      }
+    }
   }
 };
 

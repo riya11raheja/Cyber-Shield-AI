@@ -33,6 +33,8 @@ app.use(
     origin: [
       "http://localhost:5173",
       "http://127.0.0.1:5173",
+      "https://cyber-shield-ai.vercel.app",
+      "https://your-real-vercel-domain.vercel.app",
     ],
     credentials: true,
   })

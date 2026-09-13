@@ -1,3 +1,4 @@
+
 import { useState } from "react";
 import {
   UserRoundCheck,
@@ -12,59 +13,62 @@ import {
   RefreshCw,
 } from "lucide-react";
 
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL || "http://localhost:5000";
+
 function CallerVerification() {
   const [phone, setPhone] = useState("");
   const [verifying, setVerifying] = useState(false);
   const [result, setResult] = useState(null);
 
   const verifyCaller = async () => {
-  if (!phone.trim()) return;
+    if (!phone.trim()) return;
 
-  try {
-    setVerifying(true);
-    setResult(null);
+    try {
+      setVerifying(true);
+      setResult(null);
 
-    const response = await fetch(
-      "http://localhost:5000/api/caller-verification/verify",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          phone: phone.trim(),
-        }),
-      }
-    );
-
-    const data = await response.json();
-
-    console.log("Caller verification response:", data);
-
-    if (!response.ok || !data.success) {
-      throw new Error(
-        data.message || "Caller verification failed"
+      const response = await fetch(
+        `${API_BASE_URL}/api/caller-verification/verify`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            phone: phone.trim(),
+          }),
+        }
       );
+
+      const data = await response.json();
+
+      console.log("Caller verification response:", data);
+
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data.message || "Caller verification failed"
+        );
+      }
+
+      setResult(data.result);
+    } catch (error) {
+      console.error("Caller verification error:", error);
+
+      setResult({
+        safe: false,
+        score: 0,
+        status: "VERIFICATION FAILED",
+        name: "Unable to Verify",
+        description:
+          error.message ||
+          "Unable to verify this caller at the moment.",
+        signals: [],
+      });
+    } finally {
+      setVerifying(false);
     }
-
-    setResult(data.result);
-  } catch (error) {
-    console.error("Caller verification error:", error);
-
-    setResult({
-      safe: false,
-      score: 0,
-      status: "VERIFICATION FAILED",
-      name: "Unable to Verify",
-      description:
-        error.message ||
-        "Unable to verify this caller at the moment.",
-      signals: [],
-    });
-  } finally {
-    setVerifying(false);
-  }
-};
+  };
 
   const reset = () => {
     setPhone("");
@@ -90,11 +94,12 @@ function CallerVerification() {
         </h1>
 
         <p className="mt-2 text-sm text-slate-500">
-          Check a phone number for suspicious activity before trusting the caller.
+          Check a phone number for suspicious activity before trusting the
+          caller.
         </p>
       </div>
 
-      {/* Search */}
+      {/* Search Card */}
       <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
         <div className="mx-auto max-w-2xl">
           <div className="text-center">
@@ -118,9 +123,9 @@ function CallerVerification() {
               <input
                 type="tel"
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
+                onChange={(event) => setPhone(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
                     verifyCaller();
                   }
                 }}
@@ -155,13 +160,11 @@ function CallerVerification() {
         </div>
       </div>
 
-      {/* Result */}
+      {/* Result Card */}
       {result && (
         <div
           className={`overflow-hidden rounded-3xl border bg-white shadow-sm ${
-            result.safe
-              ? "border-green-200"
-              : "border-red-200"
+            result.safe ? "border-green-200" : "border-red-200"
           }`}
         >
           {/* Result Header */}
@@ -242,13 +245,13 @@ function CallerVerification() {
               </p>
 
               <div className="mt-5 space-y-3">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center justify-between gap-4 border-b border-slate-100 pb-3">
                   <span className="flex items-center gap-2 text-xs text-slate-500">
                     <Phone size={14} />
                     Number
                   </span>
 
-                  <span className="text-xs font-semibold text-slate-700">
+                  <span className="break-all text-right text-xs font-semibold text-slate-700">
                     {phone}
                   </span>
                 </div>
@@ -309,6 +312,19 @@ function CallerVerification() {
                   </p>
                 </div>
 
+                {Array.isArray(result.signals) &&
+                  result.signals.length > 0 &&
+                  result.signals.map((signal, index) => (
+                    <div
+                      key={`${signal}-${index}`}
+                      className="rounded-xl bg-slate-50 px-3 py-3"
+                    >
+                      <p className="text-xs font-medium text-slate-700">
+                        {signal}
+                      </p>
+                    </div>
+                  ))}
+
                 <div className="rounded-xl bg-amber-50 px-3 py-3">
                   <p className="text-xs font-semibold text-amber-700">
                     Never share OTP or banking credentials
@@ -348,7 +364,7 @@ function CallerVerification() {
         </div>
       )}
 
-      {/* Info */}
+      {/* Information Cards */}
       {!result && (
         <div className="grid gap-4 md:grid-cols-3">
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">

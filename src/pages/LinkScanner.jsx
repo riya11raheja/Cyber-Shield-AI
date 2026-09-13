@@ -1,3 +1,4 @@
+
 import { useState } from "react";
 import {
   ShieldCheck,
@@ -5,6 +6,9 @@ import {
   XCircle,
   Loader2,
 } from "lucide-react";
+
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 function LinkScanner() {
   const [url, setUrl] = useState("");
@@ -19,7 +23,7 @@ function LinkScanner() {
 
     try {
       const response = await fetch(
-        "http://localhost:5000/api/scanner/scan",
+        `${API_BASE_URL}/api/scanner/scan`,
         {
           method: "POST",
           headers: {
@@ -33,7 +37,7 @@ function LinkScanner() {
 
       const data = await response.json();
 
-      if (!response.ok) {
+      if (!response.ok || data.success === false) {
         throw new Error(data.message || "Scan failed");
       }
 
@@ -44,7 +48,8 @@ function LinkScanner() {
       setResult({
         status: "error",
         message:
-          error.message || "Unable to connect to Cyber Shield server.",
+          error.message ||
+          "Unable to connect to Cyber Shield server.",
       });
     } finally {
       setLoading(false);
@@ -52,6 +57,15 @@ function LinkScanner() {
   };
 
   const stats = result?.stats || {};
+
+  const riskScore =
+    result?.status === "malicious"
+      ? 100
+      : result?.status === "suspicious"
+      ? 60
+      : result?.status === "safe"
+      ? 0
+      : 25;
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -80,9 +94,11 @@ function LinkScanner() {
           <input
             type="url"
             value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") scanUrl();
+            onChange={(event) => setUrl(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                scanUrl();
+              }
             }}
             placeholder="https://example.com"
             className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
@@ -221,14 +237,7 @@ function LinkScanner() {
               </span>
 
               <span className="text-lg font-bold text-slate-900">
-                {result.status === "malicious"
-                  ? 100
-                  : result.status === "suspicious"
-                  ? 60
-                  : result.status === "safe"
-                  ? 0
-                  : 25}
-                /100
+                {riskScore}/100
               </span>
             </div>
 
@@ -236,15 +245,7 @@ function LinkScanner() {
               <div
                 className="h-full rounded-full bg-blue-600 transition-all"
                 style={{
-                  width: `${
-                    result.status === "malicious"
-                      ? 100
-                      : result.status === "suspicious"
-                      ? 60
-                      : result.status === "safe"
-                      ? 0
-                      : 25
-                  }%`,
+                  width: `${riskScore}%`,
                 }}
               />
             </div>
@@ -252,7 +253,7 @@ function LinkScanner() {
 
           {/* URL */}
           <p className="mt-4 break-all text-xs text-slate-400">
-            Scanned URL: {result.url}
+            Scanned URL: {result.url || url}
           </p>
         </div>
       )}
